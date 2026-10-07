@@ -59,6 +59,14 @@ pytest -q
 - 旧报告自动变为 `needs_review`，记录替代标定版本；
 - 需要新结果时创建新任务、新报告，绝不在同一结果中混用新旧系数。
 
+### 标定预览（只读试算）
+
+发布新版本前，标定员可在**已完成清单的一个短时间窗**上用候选系数做只读预览：`POST /manifests/{id}/calibration-preview`。
+
+- 沿现有块读取（`group_chunks_by_rate`，可透明跨块拼接同一段）与同一标定公式（`y=gain*x+offset`、`phase_shift_rad`）计算每通道真实 RMS、基波相位，并与基线版本并列给出差值（含 RMS 比值和包裹到 (-π,π] 的相位差）。
+- **预览不创建分析任务、报告或标定版本，也不写库**（响应 `persisted=false`）；取消预览后旧标定与报告原样不变。正式任务仍只在显式选择并冻结版本后才使用新系数。
+- 明确诊断：窗口内缺块为 error（不推算、不出指标），窗口外缺块为 warning；跨采样率段为 error（不重采样/拼接），单段内试算仅提示 `sample_rate_changed`；非整周期窗为 warning；窗短到基波不落任何 DFT bin 为 error（RMS 差值仍给出，相位为 null）。
+
 ## 数值口径
 
 详见 [`docs/analysis-conventions.md`](docs/analysis-conventions.md)。摘要：
@@ -96,7 +104,7 @@ pytest -q
 - 8 线程并发完成同一清单；
 - 已知 3/5 次谐波的 THD、真实 RMS；
 - 平衡三相正/负/零序；
-- A 相反相接线：负序 200、零序 100、正序 100；
+- A 相反相接线：负序 200、零序 200、正序 100；
 - 标定更新后旧报告 `needs_review`；
 - 频谱任务崩溃、过期 worker 租约恢复与重试不重复发布；
 - 缺相、饱和、非整周期、采样率变化的质量状态。

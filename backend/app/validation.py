@@ -259,8 +259,17 @@ def validate_received_chunks(db: Session, manifest: Manifest) -> tuple[bool, lis
             next_interval = (parse_time(item.end_time) - parse_time(item.start_time)).total_seconds() / max(
                 1, item.sample_count - 1
             )
+            prev_interval = (
+                parse_time(prev.end_time) - parse_time(prev.start_time)
+            ).total_seconds() / max(1, prev.sample_count - 1)
             time_gap = (parse_time(item.start_time) - parse_time(prev.end_time)).total_seconds()
-            if abs(time_gap - next_interval) > TIME_TOLERANCE_SECONDS:
+            # At a declared sample-rate boundary the "one more sample after the
+            # previous block's last point" gap is measured by the previous rate,
+            # not the new block's rate; accept either so a legal rate change is
+            # not called a discontinuity.
+            if abs(time_gap - next_interval) > TIME_TOLERANCE_SECONDS and abs(
+                time_gap - prev_interval
+            ) > TIME_TOLERANCE_SECONDS:
                 issues.append(
                     add_issue(
                         db,

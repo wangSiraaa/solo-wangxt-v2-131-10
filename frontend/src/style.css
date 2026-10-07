@@ -55,3 +55,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { border-bottom: 1px solid #e5ebf3; padding: 7px; text-align: left; }
 pre { white-space: pre-wrap; max-height: 260px; overflow: auto; background: #0f172a; color: #dbeafe; padding: 12px; border-radius: 8px; }
+.preview-box { border: 1px dashed #9db6d4; border-radius: 10px; padding: 12px; background: #f8fbff; margin: 10px 0; }
+.preview-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 10px; }
+.preview-controls input[type="number"] { width: 110px; margin-left: 4px; }
+.preview-box input[type="number"] { padding: 4px 6px; border: 1px solid #c7d3e3; border-radius: 6px; }
+.preview-error { margin-top: 10px; max-height: 180px; }

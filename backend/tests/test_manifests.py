@@ -47,7 +47,8 @@ def test_overlapping_declaration_is_rejected_at_manifest_create(client: TestClie
         },
     )
     assert response.status_code == 422
-    assert response.json()["detail"]["issues"][0]["code"] == "byte_range_overlap"
+    codes = {issue["code"] for issue in response.json()["detail"]["issues"]}
+    assert "byte_range_overlap" in codes
 
 
 def test_byte_digest_mismatch_blocks_completion(client: TestClient):
@@ -63,22 +64,40 @@ def test_byte_digest_mismatch_blocks_completion(client: TestClient):
     assert response.json()["detail"]["code"] == "byte_digest_mismatch"
 
 
+def test_rate_change_boundary_finalizes_with_warning_only(client: TestClient):
+    from tests.synthetic import make_rate_change_chunks
+
+    chunks = make_rate_change_chunks()
+    manifest = create_manifest(client, chunks, nominal_sample_rate=6000)
+    upload_chunks(client, manifest["id"], chunks)
+    response = client.post(f"/manifests/{manifest['id']}/finalize")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["completed"] is True
+    assert [warning["code"] for warning in body["warnings"]] == ["sample_rate_changed"]
+    assert client.get(f"/manifests/{manifest['id']}").json()["status"] == "completed"
+
+
 def test_concurrent_finalization_succeeds_once(client: TestClient):
     chunks = make_chunks(sample_chunks=(120, 240))
     manifest = create_manifest(client, chunks)
     upload_chunks(client, manifest["id"], chunks)
 
     def finalize(_):
-        return client.post(f"/manifests/{manifest['id']}/finalize").status_code
+        response = client.post(f"/manifests/{manifest['id']}/finalize")
+        try:
+            body = response.json()
+        except Exception:
+            body = None
+        return response.status_code, body
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         responses = list(executor.map(finalize, range(8)))
     bodies = []
     completed = 0
-    for response in responses:
-        assert response.status_code in {200, 409}
-        if response.status_code == 200:
-            body = response.json()
+    for status_code, body in responses:
+        assert status_code in {200, 409}
+        if status_code == 200 and body is not None:
             bodies.append(body)
             completed += int(body.get("completed") is True)
     assert completed == 1

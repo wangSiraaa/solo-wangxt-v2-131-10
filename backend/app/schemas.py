@@ -111,6 +111,17 @@ class AnalysisCreate(BaseModel):
     idempotency_key: str | None = None
 
 
+class CalibrationPreviewRequest(BaseModel):
+    # Read-only what-if probe: none of these values are persisted and no task,
+    # report or calibration version is created.
+    start_seconds: float = Field(ge=0.0)
+    duration_seconds: float | None = Field(default=None, gt=0.0)
+    end_seconds: float | None = Field(default=None, ge=0.0)
+    candidate_coefficients: dict[str, CalibrationCoefficient]
+    baseline_calibration_version_id: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class TaskOut(BaseModel):
     id: str
     manifest_id: str

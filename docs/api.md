@@ -49,6 +49,31 @@
 
 返回分段、采样率、降采样波形和缺口/质量 issue，供 Vue/ECharts 展示。后端使用磁盘 memmap 和降采样，避免把数 GB 原始波形全部放入响应内存。
 
+### `POST /manifests/{id}/calibration-preview`
+
+**只读标定试算**：在一份已完成清单的短时间窗上，沿现有块读取（`group_chunks_by_rate`）与标定公式（`y=gain*x+offset`、频域 `phase_shift_rad`）计算各通道 RMS、基波相位，以及候选系数与基线版本的差值。**不创建分析任务、报告或标定版本，不写库**，可随时取消。
+
+```json
+{
+  "start_seconds": 0.0,
+  "duration_seconds": 0.12,
+  "candidate_coefficients": {
+    "Va": {"gain": 2.0, "offset": 0.0, "phase_shift_rad": 0.0}
+  },
+  "baseline_calibration_version_id": "…（可选，省略时与 gain=1/offset=0/phase=0 对比）",
+  "params": {}
+}
+```
+
+`duration_seconds` 与 `end_seconds` 二选一。返回 `channels[]`（每通道 baseline/candidate/delta，含 `rms_ratio` 与包裹到 (-π,π] 的相位差）、实际命中的采样率段/块序号/样本数，以及 `diagnostics`：
+
+- `missing_chunk`（error）：窗口内声明块未上传，不推算样本、不出指标；窗口外缺块只给 `missing_chunk_outside_window` warning；
+- `sample_rate_cross_segment`（error）：窗口跨采样率段边界，不重采样、不拼接，须改选单段窗口；单段内试算时仅给 `sample_rate_changed` warning；
+- `non_integer_cycle`（warning）：窗长不等于 `round(cycles*fs/f0)`，指标仅供诊断；
+- `fundamental_unresolvable`（error）：窗太短以致基波不占任何 DFT bin，此时仍给真实 RMS 差值，基波相位为 `null`。
+
+`status` 为 `ok/warning/error`，`persisted` 恒为 `false`。窗口越界、同时给时长与终点、候选系数不覆盖完整通道集合等返回 422。
+
 ## 标定
 
 ### `POST /calibrations`

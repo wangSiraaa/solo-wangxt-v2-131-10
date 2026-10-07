@@ -9,10 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..calibration_preview import CalibrationPreviewError, build_calibration_preview
 from ..config import get_settings
 from ..database import get_db
 from ..dsp import calibrate_series, group_chunks_by_rate
 from ..models import CalibrationVersion, Chunk, Manifest
+from ..schemas import CalibrationPreviewRequest
 from ..storage import get_object_store
 
 router = APIRouter(prefix="/manifests", tags=["preview"])
@@ -129,3 +131,37 @@ def preview_manifest(
             for issue in sorted(manifest.issues, key=lambda item: item.created_at)
         ],
     }
+
+
+@router.post("/{manifest_id}/calibration-preview")
+def calibration_preview(
+    manifest_id: str,
+    payload: CalibrationPreviewRequest,
+    db: Session = Depends(get_db),
+):
+    """Read-only what-if probe for candidate calibration coefficients.
+
+    Computes preview RMS and fundamental phase per channel over one short
+    window and the deltas against a baseline version. It creates no analysis
+    task, report or calibration version and commits nothing.
+    """
+
+    manifest = db.get(Manifest, manifest_id)
+    if manifest is None:
+        raise HTTPException(404, "manifest not found")
+    try:
+        return build_calibration_preview(
+            db,
+            manifest,
+            start_seconds=payload.start_seconds,
+            duration_seconds=payload.duration_seconds,
+            end_seconds=payload.end_seconds,
+            candidate_coefficients={
+                channel: coefficient.model_dump()
+                for channel, coefficient in payload.candidate_coefficients.items()
+            },
+            baseline_calibration_version_id=payload.baseline_calibration_version_id,
+            params=payload.params,
+        )
+    except CalibrationPreviewError as exc:
+        raise HTTPException(422, str(exc)) from exc

@@ -50,6 +50,10 @@
         <h3>波形（按固定采样率分段，不做插值拼接）</h3>
         <WaveformChart :preview="preview" />
 
+        <h3>标定预览（只读试算，不创建任务/报告/标定版本）</h3>
+        <CalibrationPreview :manifest="manifest" :calibrations="calibrations"
+          :selected-calibration-id="selectedCalibrationId" />
+
         <h3>分析任务</h3>
         <div style="margin-bottom:10px">
           <label>固定标定版本：
@@ -312,6 +316,205 @@ const SequenceTable = {
   },
   template: `<table v-if="rows.length"><thead><tr><th>分量</th><th>RMS</th><th>相位°</th><th>峰值相量</th></tr></thead>
     <tbody><tr v-for="r in rows" :key="r.name"><td>{{r.name}}</td><td>{{r.rms.toFixed(5)}}</td><td>{{r.phase.toFixed(3)}}</td><td>{{r.phasor}}</td></tr></tbody></table>`
+}
+
+const CalibrationPreview = {
+  props: ['manifest', 'calibrations', 'selectedCalibrationId'],
+  setup(props) {
+    const open = ref(false)
+    const busy = ref(false)
+    const error = ref('')
+    const result = ref(null)
+    const startSeconds = ref(0)
+    const durationSeconds = ref(0.12)
+    const useEnd = ref(false)
+    const endSeconds = ref(0.12)
+    const baselineId = ref('')
+    const rows = ref([])
+
+    const defaultRow = () => ({ gain: 1, offset: 0, phase_shift_rad: 0 })
+    const seedRows = () => {
+      const baseline = props.calibrations.find((item) => item.id === baselineId.value)
+      rows.value = (props.manifest?.channel_set || []).map((channel) => {
+        const coef = baseline?.coefficients?.[channel] || defaultRow()
+        return {
+          channel,
+          gain: Number(coef.gain ?? 1),
+          offset: Number(coef.offset ?? 0),
+          phase_shift_rad: Number(coef.phase_shift_rad ?? 0)
+        }
+      })
+    }
+
+    const nominalRate = computed(() => Number(props.manifest?.nominal_sample_rate) || 6000)
+    const windowSamples = computed(() => Math.round(Number(durationSeconds.value) * nominalRate.value))
+    const integerWindowSeconds = computed(() => 6 / 50)
+    const setIntegerWindow = () => { useEnd.value = false; durationSeconds.value = integerWindowSeconds.value }
+
+    const channelResult = (channel) =>
+      (result.value?.channels || []).find((item) => item.channel === channel)
+    const fmt = (value, digits = 5) => (value === null || value === undefined || Number.isNaN(Number(value)))
+      ? '—'
+      : Number(value).toFixed(digits)
+    const signed = (value, digits = 5) => {
+      if (value === null || value === undefined) return '—'
+      const n = Number(value)
+      return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}`
+    }
+    const diagnostics = computed(() => result.value?.diagnostics || [])
+
+    async function openPanel() {
+      open.value = true
+      result.value = null
+      error.value = ''
+      baselineId.value = props.selectedCalibrationId
+        || props.calibrations.find((item) => item.status === 'active')?.id
+        || props.calibrations[0]?.id
+        || ''
+      seedRows()
+    }
+    function closePanel() {
+      // Cancelling the preview discards only local what-if state; the backend
+      // never persisted anything, so calibrations and reports are untouched.
+      open.value = false
+      result.value = null
+      error.value = ''
+    }
+    watch(baselineId, seedRows)
+    watch(() => props.manifest?.id, () => { open.value = false; result.value = null; error.value = '' })
+
+    async function run() {
+      busy.value = true
+      error.value = ''
+      try {
+        const candidate = {}
+        for (const row of rows.value) {
+          candidate[row.channel] = {
+            gain: Number(row.gain),
+            offset: Number(row.offset),
+            phase_shift_rad: Number(row.phase_shift_rad)
+          }
+        }
+        const payload = {
+          start_seconds: Number(startSeconds.value),
+          candidate_coefficients: candidate,
+          baseline_calibration_version_id: baselineId.value || null
+        }
+        if (useEnd.value) payload.end_seconds = Number(endSeconds.value)
+        else payload.duration_seconds = Number(durationSeconds.value)
+        result.value = await api.calibrationPreview(props.manifest.id, payload)
+      } catch (err) {
+        result.value = null
+        try { error.value = JSON.stringify(JSON.parse(err.message), null, 2) } catch { error.value = String(err.message || err) }
+      } finally {
+        busy.value = false
+      }
+    }
+
+    return {
+      open, busy, error, result, rows, startSeconds, durationSeconds, useEnd, endSeconds,
+      baselineId, nominalRate, windowSamples, integerWindowSeconds, setIntegerWindow,
+      openPanel, closePanel, run, channelResult, fmt, signed, diagnostics
+    }
+  },
+  template: `
+    <div v-if="!open">
+      <button @click="openPanel" :disabled="manifest.status !== 'completed'">打开标定预览</button>
+      <span class="meta" v-if="manifest.status !== 'completed'">清单完成核对后才可试算</span>
+      <span class="meta" v-else>在短时间窗上并列比较候选系数与当前版本的 RMS / 基波相位差值；试算不落库。</span>
+    </div>
+    <div v-else class="preview-box">
+      <div class="preview-controls">
+        <label>窗口起点 s <input type="number" step="0.001" min="0" v-model.number="startSeconds"></label>
+        <template v-if="!useEnd">
+          <label>窗长 s <input type="number" step="0.001" min="0.001" v-model.number="durationSeconds"></label>
+        </template>
+        <template v-else>
+          <label>窗口终点 s <input type="number" step="0.001" min="0" v-model.number="endSeconds"></label>
+        </template>
+        <label class="meta"><input type="checkbox" v-model="useEnd"> 用终点代替窗长</label>
+        <button class="secondary" type="button" @click="setIntegerWindow">取整周期窗 (6×50Hz=0.12s)</button>
+        <span class="meta">≈ {{ windowSamples }} 样本 @{{ nominalRate }}Hz（仅供参考，实际按所在段采样率计算）</span>
+      </div>
+      <table>
+        <thead><tr><th>通道</th><th>候选 gain</th><th>候选 offset</th><th>候选 phase_shift (rad / °)</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="row in rows" :key="row.channel">
+            <td>{{ row.channel }}</td>
+            <td><input type="number" step="0.01" v-model.number="row.gain"></td>
+            <td><input type="number" step="0.1" v-model.number="row.offset"></td>
+            <td>
+              <input type="number" step="0.01" v-model.number="row.phase_shift_rad" style="width:90px">
+              <span class="meta">{{ (row.phase_shift_rad * 180 / Math.PI).toFixed(2) }}°</span>
+            </td>
+            <td><button class="secondary" type="button" @click="row.gain = Number((row.gain * 2).toFixed(6))">gain ×2</button></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin:10px 0">
+        <label>对比基线标定：
+          <select v-model="baselineId" style="max-width:360px">
+            <option value="">原始未标定（gain=1/offset=0/phase=0）</option>
+            <option v-for="c in calibrations" :key="c.id" :value="c.id">
+              {{ c.id.slice(0,8) }}… · {{ c.status }} · {{ c.change_note || '初始版本' }}
+            </option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <button @click="run" :disabled="busy">{{ busy ? '试算中…' : '运行预览' }}</button>
+        <button class="secondary" type="button" @click="closePanel">取消预览</button>
+      </div>
+      <pre v-if="error" class="preview-error">{{ error }}</pre>
+
+      <template v-if="result">
+        <p class="meta" style="margin-top:10px">
+          实际窗口 {{ fmt(result.window.start_seconds, 6) }}–{{ fmt(result.window.end_seconds, 6) }} s
+          <template v-if="result.window.sample_rate"> · {{ result.window.samples }} 样本 @{{ result.window.sample_rate }}Hz · 块 {{ (result.window.sequences||[]).join(', ') }}</template>
+          · <span class="badge" :class="result.status">{{ result.status }}</span>
+          · persisted={{ result.persisted }}
+        </p>
+        <div v-for="d in diagnostics" :key="d.code + (d.channel||'')" class="issue" :class="d.severity">
+          <strong>[{{ d.severity }}] {{ d.code }}</strong> — {{ d.message }}
+          <span class="meta" v-if="d.channel"> 通道 {{ d.channel }}</span>
+          <div class="meta" v-if="Object.keys(d.details||{}).length">{{ JSON.stringify(d.details) }}</div>
+        </div>
+        <table v-if="result.channels.length">
+          <thead>
+            <tr>
+              <th rowspan="2">通道</th>
+              <th colspan="3">RMS</th>
+              <th colspan="2">基波 RMS</th>
+              <th colspan="2">基波相位</th>
+              <th>DC</th>
+            </tr>
+            <tr><th>当前版本</th><th>候选</th><th>差值 / 比值</th>
+              <th>当前版本</th><th>候选</th>
+              <th>当前 °</th><th>候选 ° (Δ°)</th>
+              <th>Δ</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in rows" :key="row.channel">
+              <td>{{ row.channel }}</td>
+              <td>{{ fmt(channelResult(row.channel)?.baseline.rms) }}</td>
+              <td>{{ fmt(channelResult(row.channel)?.candidate.rms) }}</td>
+              <td>{{ signed(channelResult(row.channel)?.delta.rms) }}
+                <span class="meta">/ {{ channelResult(row.channel)?.delta.rms_ratio === null ? '—' : fmt(channelResult(row.channel)?.delta.rms_ratio, 4) }}×</span>
+              </td>
+              <td>{{ fmt(channelResult(row.channel)?.baseline.fundamental_rms) }}</td>
+              <td>{{ fmt(channelResult(row.channel)?.candidate.fundamental_rms) }}</td>
+              <td>{{ fmt(channelResult(row.channel)?.baseline.fundamental_phase_deg, 3) }}</td>
+              <td>{{ fmt(channelResult(row.channel)?.candidate.fundamental_phase_deg, 3) }}
+                <span class="meta">({{ signed(channelResult(row.channel)?.delta.fundamental_phase_deg, 3) }})</span>
+              </td>
+              <td>{{ signed(channelResult(row.channel)?.delta.dc) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="meta" v-else-if="result.status === 'error'">存在 error 级诊断（如缺块或跨采样率段），未计算指标；调整窗口后重新试算。</p>
+      </template>
+    </div>
+  `
 }
 
 onMounted(async () => { await refreshAll(); timer.value = setInterval(loadDetail, 4000) })
