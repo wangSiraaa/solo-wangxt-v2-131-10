@@ -55,3 +55,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { border-bottom: 1px solid #e5ebf3; padding: 7px; text-align: left; }
 pre { white-space: pre-wrap; max-height: 260px; overflow: auto; background: #0f172a; color: #dbeafe; padding: 12px; border-radius: 8px; }
+.cal-preview { border: 1px dashed #b9c8dd; border-radius: 10px; padding: 12px; background: #fbfdff; margin: 10px 0; }
+.cal-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; font-size: 13px; }
+.cal-controls input, .cal-controls select { padding: 5px 7px; border: 1px solid #c7d3e3; border-radius: 6px; }
+.cal-preview table input { width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid #d3dcea; border-radius: 5px; }
+.delta-hot { color: #b4234a; font-weight: 600; }

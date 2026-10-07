@@ -111,6 +111,21 @@ class AnalysisCreate(BaseModel):
     idempotency_key: str | None = None
 
 
+class CalibrationPreviewCreate(BaseModel):
+    # Candidate coefficients are tried on the fly. They are never persisted as a
+    # CalibrationVersion; a formal task must still select/freeze a version.
+    candidate_version_id: str | None = None
+    candidate_coefficients: dict[str, CalibrationCoefficient] | None = None
+    # Baseline to diff against. Defaults to the active version; callers may pin
+    # an older (e.g. superseded) version to trial a candidate against it.
+    baseline_version_id: str | None = None
+    start_seconds: float = Field(ge=0.0)
+    duration_seconds: float | None = Field(default=None, gt=0.0, le=300.0)
+    sample_count: int | None = Field(default=None, gt=0, le=1_000_000)
+    fundamental_hz: float = 50.0
+    cycles_per_window: int = Field(default=6, ge=1, le=1000)
+
+
 class TaskOut(BaseModel):
     id: str
     manifest_id: str

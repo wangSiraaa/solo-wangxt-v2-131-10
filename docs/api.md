@@ -49,6 +49,48 @@
 
 返回分段、采样率、降采样波形和缺口/质量 issue，供 Vue/ECharts 展示。后端使用磁盘 memmap 和降采样，避免把数 GB 原始波形全部放入响应内存。
 
+### `POST /manifests/{id}/calibration-preview`
+
+标定员发布新版本前，在一份**已完成**清单的短时间窗上试算候选系数。只读，不创建分析任务、报告或标定版本，也不写数据库。
+
+请求体（二选一提供候选）：
+
+```json
+{
+  "start_seconds": 0.0,
+  "sample_count": 720,
+  "fundamental_hz": 50.0,
+  "cycles_per_window": 6,
+  "candidate_coefficients": {
+    "Va": {"gain": 2.0, "offset": 0.0, "phase_shift_rad": 0.0}
+  }
+}
+```
+
+也可用 `"candidate_version_id": "<calibration id>"` 试算一个已保存版本，并可
+用 `"baseline_version_id"` 指定对比基线（默认当前 active 版本）。候选与基线
+必须恰好提供一种，且系数需覆盖清单全部通道。
+
+计算沿现有块读取路径（`group_chunks_by_rate`，仅拉取窗口涉及的块）和同一
+标定公式（`y = gain*x + offset`，频域常数相位）输出每个通道的：
+
+- 基线 / 候选 RMS 与基波相位（DFT 单频-bin，度与弧度）；
+- 差值 `delta.rms` 与包裹到 `(-π, π]` 的 `delta.fundamental_phase_*`。
+
+例如 gain 翻倍且 offset=0 时候选 RMS 恰为基线 2 倍；纯 `phase_shift_rad` 只
+改变基波相位、不改变 RMS。
+
+明确诊断（HTTP 仍为 200，体现在 `status`/`diagnostics`）：
+
+- `preview_missing_chunks`（error）：窗口涉及的块未上传或字节缺失，绝不补样本；
+- `preview_crosses_rate_boundary`（error）：窗口跨越采样率变化段，不做插值拼接；
+- `preview_window_beyond_recording` / `preview_window_out_of_range`（error）：窗口越界，不补零；
+- `non_integer_cycle`（warning）：样本数不等于 `round(cycles_per_window*fs/f0)`，相位/bin 指标仅供诊断；
+- `preview_start_off_sample`（warning）：起点未落在采样点，已取最近样本。
+
+取消预览只是在前端丢弃结果；服务器没有任何状态需要回滚。正式任务仍只有在
+`POST /analysis-tasks` 显式选择并冻结标定版本后才会使用新系数。
+
 ## 标定
 
 ### `POST /calibrations`

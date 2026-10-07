@@ -34,6 +34,8 @@ def post_calibration(payload: CalibrationCreate, db: Session = Depends(get_db)):
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    db.commit()
+    db.refresh(version)
     return version
 
 

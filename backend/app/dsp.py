@@ -185,6 +185,12 @@ def calibrate_series(values: np.ndarray, coefficient: dict[str, Any]) -> np.ndar
     return values * gain + offset
 
 
+def wrap_phase(angle: float) -> float:
+    """Map a phase difference into (-pi, pi], matching atan2 conventions."""
+
+    return float((angle + math.pi) % (2.0 * math.pi) - math.pi)
+
+
 def apply_calibration(data: np.ndarray, channels: list[str], coefficients: dict[str, Any]) -> np.ndarray:
     calibrated = np.empty_like(data)
     for index, channel in enumerate(channels):

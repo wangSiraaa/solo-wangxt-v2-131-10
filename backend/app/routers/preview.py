@@ -13,6 +13,8 @@ from ..config import get_settings
 from ..database import get_db
 from ..dsp import calibrate_series, group_chunks_by_rate
 from ..models import CalibrationVersion, Chunk, Manifest
+from ..preview_service import build_calibration_preview
+from ..schemas import CalibrationPreviewCreate
 from ..storage import get_object_store
 
 router = APIRouter(prefix="/manifests", tags=["preview"])
@@ -129,3 +131,37 @@ def preview_manifest(
             for issue in sorted(manifest.issues, key=lambda item: item.created_at)
         ],
     }
+
+
+@router.post("/{manifest_id}/calibration-preview")
+def calibration_preview(
+    manifest_id: str,
+    payload: CalibrationPreviewCreate,
+    db: Session = Depends(get_db),
+):
+    """Read-only side-by-side trial of candidate calibration coefficients.
+
+    Uses the same block reading path and calibration formula as formal
+    analysis, but creates no analysis task, report, or calibration version.
+    Missing blocks, rate-crossing windows, and non-integer-cycle windows are
+    returned as explicit diagnostics in the body.
+    """
+
+    manifest = db.get(Manifest, manifest_id)
+    if manifest is None:
+        raise HTTPException(404, "manifest not found")
+    if manifest.status != "completed":
+        raise HTTPException(
+            422,
+            {
+                "code": "preview_manifest_not_completed",
+                "message": "calibration preview requires an already completed manifest",
+                "status": manifest.status,
+            },
+        )
+    try:
+        return build_calibration_preview(db, manifest, payload)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, {"code": "preview_invalid_request", "message": str(exc)}) from exc

@@ -256,11 +256,12 @@ def validate_received_chunks(db: Session, manifest: Manifest) -> tuple[bool, lis
                 )
             )
         try:
-            next_interval = (parse_time(item.end_time) - parse_time(item.start_time)).total_seconds() / max(
-                1, item.sample_count - 1
-            )
+            # The first sample of the next block follows one sample period after
+            # the last sample of the previous block; that period is measured on
+            # the previous block's clock (it may differ across a rate change).
+            prev_interval = 1.0 / float(prev.sample_rate)
             time_gap = (parse_time(item.start_time) - parse_time(prev.end_time)).total_seconds()
-            if abs(time_gap - next_interval) > TIME_TOLERANCE_SECONDS:
+            if abs(time_gap - prev_interval) > TIME_TOLERANCE_SECONDS:
                 issues.append(
                     add_issue(
                         db,
@@ -269,7 +270,7 @@ def validate_received_chunks(db: Session, manifest: Manifest) -> tuple[bool, lis
                         "sample_time_discontinuous",
                         "received chunks do not form one continuous sample timeline",
                         sequences=[prev.sequence, item.sequence],
-                        gap_seconds=time_gap - next_interval,
+                        gap_seconds=time_gap - prev_interval,
                     )
                 )
         except ValueError:

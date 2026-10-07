@@ -22,6 +22,8 @@ export const api = {
     const suffix = calibrationVersionId ? `?calibration_version_id=${encodeURIComponent(calibrationVersionId)}` : ''
     return request(`/manifests/${id}/preview${suffix}`)
   },
+  calibrationPreview: (id, payload) =>
+    request(`/manifests/${id}/calibration-preview`, { method: 'POST', body: JSON.stringify(payload) }),
   calibrations: (channelSetHash) =>
     request(`/calibrations${channelSetHash ? `?channel_set_hash=${encodeURIComponent(channelSetHash)}` : ''}`),
   tasks: (manifestId) => request(`/analysis-tasks?manifest_id=${encodeURIComponent(manifestId)}`),
